@@ -61,6 +61,16 @@ def test_both_postgres_url_schemes_are_accepted(
         assert build_settings(database_url=url).database_url == url
 
 
+def test_a_sqlalchemy_style_driver_suffix_is_stripped(
+    isolated_environment: pytest.MonkeyPatch,
+) -> None:
+    # D'autres services du parc utilisent SQLAlchemy et ecrivent parfois ce schema
+    # dans le DATABASE_URL partage entre tous les services : psycopg ne le comprend pas.
+    settings = build_settings(database_url="postgresql+psycopg://g4_app:secret@g4_db:5432/g4_db")
+
+    assert settings.database_url == "postgresql://g4_app:secret@g4_db:5432/g4_db"
+
+
 def test_an_unknown_training_source_is_refused(
     isolated_environment: pytest.MonkeyPatch,
 ) -> None:
