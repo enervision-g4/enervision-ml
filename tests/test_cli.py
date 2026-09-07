@@ -71,3 +71,18 @@ def test_evaluate_rejects_an_unsupported_source() -> None:
     result = runner.invoke(application, ["evaluate", "--source", "database"])
 
     assert result.exit_code != 0
+
+
+def test_forecast_without_once_refuses_to_start() -> None:
+    # La boucle continue arrive a l'etape 8 : sans --once, il n'y a rien a executer.
+    result = runner.invoke(application, ["forecast"])
+
+    assert result.exit_code != 0
+
+
+def test_forecast_once_without_a_database_url_fails_clearly(monkeypatch) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    result = runner.invoke(application, ["forecast", "--once"])
+
+    assert result.exit_code != 0

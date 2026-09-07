@@ -68,3 +68,23 @@ class InconsistentSamplingError(ExtractionError):
         super().__init__(f"sampling step for site {site_id!r} is not usable: {detail}")
         self.site_id = site_id
         self.detail = detail
+
+
+class DatabaseQueryError(ExtractionError):
+    """Le pilote echoue a executer une requete de lecture.
+
+    Attributes:
+        context: Ce qui etait interroge, un site ou "site catalog".
+        cause: Message technique renvoye par le pilote.
+    """
+
+    def __init__(self, context: str, cause: str) -> None:
+        """Construit l'erreur pour une requete et une cause donnees.
+
+        Args:
+            context: Ce qui etait interroge, un site ou "site catalog".
+            cause: Message technique renvoye par le pilote.
+        """
+        super().__init__(f"database query failed for {context!r}: {cause}")
+        self.context = context
+        self.cause = cause
