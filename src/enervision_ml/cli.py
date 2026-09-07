@@ -2,11 +2,18 @@
 
 Composition root unique : c'est ici, et seulement ici, que la configuration est
 chargee et que les objets concrets (connexion, estimateur, source d'historique) sont
-assembles. Les commandes forecast et evaluate sont ajoutees au fil des etapes
-suivantes, au-dessus de ce squelette.
+assembles. La commande forecast est ajoutee a l'etape 7, au-dessus de ce squelette.
 """
 
+from typing import Optional
+
 import typer
+
+from .extract.csv_history import CsvHistorySource
+from .logging_setup import configure_logging, get_logger
+from .orchestration.evaluation_run import EvaluationRun
+
+logger = get_logger("cli")
 
 application = typer.Typer(
     help="Service de prevision EnerVision : entrainement par site et ecriture des previsions.",
@@ -24,6 +31,71 @@ def _root() -> None:
     callback vide lui en donne une, meme avant que forecast et evaluate
     n'existent.
     """
+
+
+@application.command("evaluate")
+def evaluate(
+    source: str = typer.Option(
+        "csv", "--source", help="Origine de l'historique. Seul csv est supporte pour l'instant."
+    ),
+    csv_path: Optional[str] = typer.Option(
+        None, "--csv-path", help="Chemin du CSV, obligatoire quand --source vaut csv."
+    ),
+    csv_source_timezone: str = typer.Option(
+        "UTC", "--csv-source-timezone", help="Fuseau d'ancrage des horodatages naifs du CSV."
+    ),
+    test_ratio: float = typer.Option(
+        0.2, "--test-ratio", help="Fraction de l'historique la plus recente reservee au test."
+    ),
+) -> None:
+    """Compare le modele a la baseline profil-horaire, sans rien ecrire en base.
+
+    Preuve, sans aucune infrastructure, que le modele apprend plus qu'un moyennage
+    naif par heure de la journee.
+
+    Args:
+        source: Origine de l'historique. Seul csv est supporte pour l'instant ;
+            database arrive a l'etape 6.
+        csv_path: Chemin du fichier CSV, obligatoire quand source vaut csv.
+        csv_source_timezone: Fuseau d'ancrage des horodatages naifs du CSV.
+        test_ratio: Fraction de l'historique la plus recente reservee au test.
+
+    Raises:
+        typer.Exit: Si la source demandee n'est pas supportee, si --csv-path manque,
+            ou si aucun site n'a assez d'historique pour etre evalue.
+    """
+    configure_logging()
+
+    if source != "csv":
+        logger.error("unsupported_evaluation_source", source=source)
+        raise typer.Exit(code=1)
+    if not csv_path:
+        logger.error("missing_csv_path")
+        raise typer.Exit(code=1)
+
+    history_source = CsvHistorySource(csv_path, source_timezone=csv_source_timezone)
+    report = EvaluationRun(history_source, test_ratio=test_ratio).run()
+
+    if not report.evaluations:
+        logger.error("no_site_evaluated", sites_skipped=report.sites_skipped)
+        raise typer.Exit(code=1)
+
+    for site_evaluation in report.evaluations:
+        typer.echo(
+            f"{site_evaluation.site_id:<10} "
+            f"model_mae={site_evaluation.model_mae:7.2f} kW  "
+            f"baseline_mae={site_evaluation.baseline_mae:7.2f} kW  "
+            f"model_mape={site_evaluation.model_mape.value:6.2f} %  "
+            f"baseline_mape={site_evaluation.baseline_mape.value:6.2f} %  "
+            f"gain={site_evaluation.improvement_percent:+6.1f} %"
+        )
+    if report.sites_skipped:
+        typer.echo(f"Sites ignores (historique insuffisant) : {', '.join(report.sites_skipped)}")
+
+    average_improvement = sum(
+        site_evaluation.improvement_percent for site_evaluation in report.evaluations
+    ) / len(report.evaluations)
+    typer.echo(f"\nGain moyen du modele sur la baseline : {average_improvement:+.1f} %")
 
 
 if __name__ == "__main__":
