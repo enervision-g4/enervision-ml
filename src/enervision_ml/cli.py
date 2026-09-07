@@ -2,16 +2,20 @@
 
 Composition root unique : c'est ici, et seulement ici, que la configuration est
 chargee et que les objets concrets (connexion, estimateur, source d'historique) sont
-assembles. La commande forecast est ajoutee a l'etape 7, au-dessus de ce squelette.
+assembles.
 """
 
 from typing import Optional
 
 import typer
 
+from .config import load_forecast_settings
 from .extract.csv_history import CsvHistorySource
+from .extract.database_history import DatabaseHistorySource
 from .logging_setup import configure_logging, get_logger
 from .orchestration.evaluation_run import EvaluationRun
+from .orchestration.forecast_run import ForecastRun
+from .postgres_connection import create_connection
 
 logger = get_logger("cli")
 
@@ -96,6 +100,55 @@ def evaluate(
         site_evaluation.improvement_percent for site_evaluation in report.evaluations
     ) / len(report.evaluations)
     typer.echo(f"\nGain moyen du modele sur la baseline : {average_improvement:+.1f} %")
+
+
+@application.command("forecast")
+def forecast(
+    once: bool = typer.Option(
+        False,
+        "--once",
+        help=(
+            "Execute un seul lot puis s'arrete. Obligatoire pour l'instant : la "
+            "boucle continue arrive a l'etape 8."
+        ),
+    ),
+) -> None:
+    """Entraine un modele par site sur measure_imputed et ecrit ses previsions en base.
+
+    Args:
+        once: Execute un seul lot puis s'arrete.
+
+    Raises:
+        typer.Exit: Si --once n'est pas fourni, ou si au moins un site a echoue.
+    """
+    if not once:
+        logger.error("continuous_forecast_not_yet_available")
+        raise typer.Exit(code=1)
+
+    settings = load_forecast_settings()
+    configure_logging(settings.log_level, settings.log_as_json)
+
+    connection = create_connection(settings.database_url)
+    try:
+        history_source = DatabaseHistorySource(connection)
+        report = ForecastRun(
+            history_source=history_source,
+            connection=connection,
+            horizon_hours=settings.horizon_hours,
+            minimum_training_hours=settings.min_training_hours,
+            threshold_ratio=settings.threshold_ratio,
+        ).run()
+    finally:
+        connection.close()
+
+    logger.info(
+        "forecast_completed",
+        sites_forecast=len(report.sites_forecast),
+        sites_skipped=len(report.sites_skipped),
+        sites_failed=len(report.sites_failed),
+    )
+    if report.sites_failed:
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":
