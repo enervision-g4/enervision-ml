@@ -13,8 +13,10 @@ from .config import load_forecast_settings
 from .extract.csv_history import CsvHistorySource
 from .extract.database_history import DatabaseHistorySource
 from .logging_setup import configure_logging, get_logger
+from .orchestration.drift_free_scheduler import DriftFreeScheduler
 from .orchestration.evaluation_run import EvaluationRun
-from .orchestration.forecast_run import ForecastRun
+from .orchestration.forecast_run import ForecastReport, ForecastRun
+from .orchestration.graceful_shutdown import ShutdownRequest
 from .postgres_connection import create_connection
 
 logger = get_logger("cli")
@@ -102,53 +104,66 @@ def evaluate(
     typer.echo(f"\nGain moyen du modele sur la baseline : {average_improvement:+.1f} %")
 
 
-@application.command("forecast")
-def forecast(
-    once: bool = typer.Option(
-        False,
-        "--once",
-        help=(
-            "Execute un seul lot puis s'arrete. Obligatoire pour l'instant : la "
-            "boucle continue arrive a l'etape 8."
-        ),
-    ),
-) -> None:
-    """Entraine un modele par site sur measure_imputed et ecrit ses previsions en base.
-
-    Args:
-        once: Execute un seul lot puis s'arrete.
-
-    Raises:
-        typer.Exit: Si --once n'est pas fourni, ou si au moins un site a echoue.
-    """
-    if not once:
-        logger.error("continuous_forecast_not_yet_available")
-        raise typer.Exit(code=1)
-
-    settings = load_forecast_settings()
-    configure_logging(settings.log_level, settings.log_as_json)
-
-    connection = create_connection(settings.database_url)
-    try:
-        history_source = DatabaseHistorySource(connection)
-        report = ForecastRun(
-            history_source=history_source,
-            connection=connection,
-            horizon_hours=settings.horizon_hours,
-            minimum_training_hours=settings.min_training_hours,
-            threshold_ratio=settings.threshold_ratio,
-        ).run()
-    finally:
-        connection.close()
-
+def _log_forecast_report(report: ForecastReport, **extra: object) -> None:
     logger.info(
         "forecast_completed",
         sites_forecast=len(report.sites_forecast),
         sites_skipped=len(report.sites_skipped),
         sites_failed=len(report.sites_failed),
+        **extra,
     )
-    if report.sites_failed:
-        raise typer.Exit(code=1)
+
+
+@application.command("forecast")
+def forecast(
+    once: bool = typer.Option(
+        False, "--once", help="Execute un seul lot puis s'arrete, au lieu de boucler."
+    ),
+) -> None:
+    """Entraine un modele par site sur measure_imputed et ecrit ses previsions en base.
+
+    Sans --once, boucle a la cadence FORECAST_INTERVAL_SECONDS jusqu'a un signal
+    d'arret (SIGTERM ou SIGINT) : c'est le mode utilise par le conteneur, dont
+    `restart: unless-stopped` relancerait un processus qui se termine de lui-meme.
+
+    Args:
+        once: Execute un seul lot puis s'arrete, au lieu de boucler.
+
+    Raises:
+        typer.Exit: Avec --once, si au moins un site a echoue.
+    """
+    settings = load_forecast_settings()
+    configure_logging(settings.log_level, settings.log_as_json)
+
+    shutdown = ShutdownRequest()
+    shutdown.install()
+
+    connection = create_connection(settings.database_url)
+    try:
+        history_source = DatabaseHistorySource(connection)
+        run = ForecastRun(
+            history_source=history_source,
+            connection=connection,
+            horizon_hours=settings.horizon_hours,
+            minimum_training_hours=settings.min_training_hours,
+            threshold_ratio=settings.threshold_ratio,
+        )
+
+        if once:
+            report = run.run()
+            _log_forecast_report(report)
+            if report.sites_failed:
+                raise typer.Exit(code=1)
+            return
+
+        scheduler = DriftFreeScheduler(settings.forecast_interval_seconds)
+        while not shutdown.requested:
+            tick = scheduler.wait_for_next_tick(should_stop=lambda: shutdown.requested)
+            if shutdown.requested:
+                break
+            _log_forecast_report(run.run(), tick=tick.index, skipped_ticks=tick.skipped_ticks)
+    finally:
+        connection.close()
 
 
 if __name__ == "__main__":

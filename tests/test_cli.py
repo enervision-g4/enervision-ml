@@ -73,16 +73,19 @@ def test_evaluate_rejects_an_unsupported_source() -> None:
     assert result.exit_code != 0
 
 
-def test_forecast_without_once_refuses_to_start() -> None:
-    # La boucle continue arrive a l'etape 8 : sans --once, il n'y a rien a executer.
-    result = runner.invoke(application, ["forecast"])
-
-    assert result.exit_code != 0
-
-
 def test_forecast_once_without_a_database_url_fails_clearly(monkeypatch) -> None:
     monkeypatch.delenv("DATABASE_URL", raising=False)
 
     result = runner.invoke(application, ["forecast", "--once"])
+
+    assert result.exit_code != 0
+
+
+def test_forecast_without_a_database_url_fails_before_looping(monkeypatch) -> None:
+    # Sans --once, la commande boucle : verifier qu'elle echoue avant meme d'essayer
+    # protege contre un test qui resterait bloque si la config etait chargee plus tard.
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    result = runner.invoke(application, ["forecast"])
 
     assert result.exit_code != 0
