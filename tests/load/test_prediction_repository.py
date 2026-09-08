@@ -6,7 +6,11 @@ import pytest
 from psycopg.errors import ForeignKeyViolation, UniqueViolation
 
 from enervision_ml.load.errors import PersistenceError, UnknownSiteReferenceError
-from enervision_ml.load.prediction_repository import insert_if_new, insert_many
+from enervision_ml.load.prediction_repository import (
+    fetch_latest_for_target,
+    insert_if_new,
+    insert_many,
+)
 from enervision_ml.records import PredictionRow
 
 PREDICTION_ID = UUID("2f1c8b3a-5d47-4e21-9a6f-0c3b7e8d1a52")
@@ -60,6 +64,36 @@ def test_another_driver_error_is_not_mistaken_for_a_missing_site(failing_connect
         insert_if_new(connection, build_prediction())
 
     assert not isinstance(failure.value, UnknownSiteReferenceError)
+
+
+def test_fetch_latest_for_target_returns_none_when_nothing_was_written(connection: Any) -> None:
+    result = fetch_latest_for_target(connection, "SITE001", TARGET_TIMESTAMP)
+
+    assert result is None
+    assert "ORDER BY \"timestamp\" DESC" in connection.opened_cursor.statements[0]
+
+
+def test_fetch_latest_for_target_rebuilds_the_prediction_row(connection: Any) -> None:
+    connection.opened_cursor.fetchone = lambda: (
+        PREDICTION_ID,
+        "SITE001",
+        TARGET_TIMESTAMP,
+        87.3,
+        150.0,
+        "scikit-learn==1.9.0+abcdef",
+        GENERATED_AT,
+    )
+
+    result = fetch_latest_for_target(connection, "SITE001", TARGET_TIMESTAMP)
+
+    assert result == build_prediction()
+
+
+def test_fetch_latest_for_target_wraps_a_driver_failure(failing_connection: Any) -> None:
+    connection = failing_connection(UniqueViolation("lecture refusee"))
+
+    with pytest.raises(PersistenceError):
+        fetch_latest_for_target(connection, "SITE001", TARGET_TIMESTAMP)
 
 
 def test_insert_many_writes_every_prediction_in_order(connection: Any) -> None:
