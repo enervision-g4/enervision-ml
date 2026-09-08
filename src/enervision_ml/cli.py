@@ -110,6 +110,7 @@ def _log_forecast_report(report: ForecastReport, **extra: object) -> None:
         sites_forecast=len(report.sites_forecast),
         sites_skipped=len(report.sites_skipped),
         sites_failed=len(report.sites_failed),
+        recommendations_written=report.recommendations_written,
         **extra,
     )
 
