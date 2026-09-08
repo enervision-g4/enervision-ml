@@ -11,16 +11,22 @@ from datetime import UTC, datetime
 from typing import Optional, cast
 
 from ..extract.history_source import HistorySourceLike
+from ..load.prediction_repository import fetch_latest_for_target
 from ..load.prediction_repository import insert_many as insert_predictions
 from ..load.recommendation_repository import insert_many as insert_recommendations
 from ..logging_setup import get_logger
 from ..model.forecaster import ConsumptionForecaster
 from ..postgres_connection import ConnectionLike
 from ..records import Observation, PredictionRow
+from ..transform.forecast_accuracy import (
+    compute_forecast_accuracy,
+    most_recently_resolved_observation,
+)
 from ..transform.prediction_drafts import build_prediction_rows, build_target_timestamps
 from ..transform.recommendations import build_recommendations
 from ..transform.thresholds import compute_threshold_kw
 from ..transform.weather_outlook import Climatology, build_climatology, project_weather
+from .experiment_tracking import ExperimentTrackingLogger
 
 logger = get_logger("forecast_run")
 
@@ -54,6 +60,7 @@ class ForecastRun:
         threshold_ratio: float,
         create_forecaster: Callable[[str], ConsumptionForecaster] = ConsumptionForecaster,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
+        experiment_logger: Optional[ExperimentTrackingLogger] = None,
     ) -> None:
         """Prepare le run.
 
@@ -65,6 +72,8 @@ class ForecastRun:
             threshold_ratio: Fraction de capacity_kw retenue comme seuil d'alerte.
             create_forecaster: Fabrique du modele, injectee par les tests.
             now: Source de l'instant courant, injectee par les tests.
+            experiment_logger: Journal MLflow de la justesse en production, ou None
+                pour desactiver ce suivi (comportement par defaut, retro-compatible).
         """
         self._history_source = history_source
         self._connection = connection
@@ -73,6 +82,7 @@ class ForecastRun:
         self._threshold_ratio = threshold_ratio
         self._create_forecaster = create_forecaster
         self._now = now
+        self._experiment_logger = experiment_logger
 
     def run(self) -> ForecastReport:
         """Entraine et ecrit les previsions de chaque site du referentiel.
@@ -95,6 +105,8 @@ class ForecastRun:
                 for observation in self._history_source.load_observations(site.site_id)
                 if observation.consumption_kw is not None
             ]
+            self._grade_previous_forecast(site.site_id, observations)
+
             if len(observations) < self._minimum_training_hours:
                 logger.warning(
                     "training_history_insufficient",
@@ -127,6 +139,48 @@ class ForecastRun:
             sites_skipped=sites_skipped,
             sites_failed=sites_failed,
             recommendations_written=recommendations_written,
+        )
+
+    def _grade_previous_forecast(self, site_id: str, observations: list[Observation]) -> None:
+        """Confronte la derniere prevision resolue a la mesure reelle, si possible.
+
+        Best-effort au meme titre que le suivi MLflow d'evaluate : ni une base
+        injoignable en lecture ni un echec de journalisation ne doivent faire echouer
+        le lot de prevision du site. Une lecture en echec annule la transaction en
+        cours pour que l'ecriture des nouvelles previsions, plus bas, reparte d'une
+        transaction saine.
+
+        Args:
+            site_id: Site concerne.
+            observations: Historique horaire deja charge pour ce site.
+        """
+        if self._experiment_logger is None:
+            return
+
+        latest_observation = most_recently_resolved_observation(observations)
+        if latest_observation is None or latest_observation.consumption_kw is None:
+            return
+
+        try:
+            previous_prediction = fetch_latest_for_target(
+                self._connection, site_id, latest_observation.timestamp
+            )
+        except Exception:
+            self._connection.rollback()
+            logger.exception("forecast_accuracy_lookup_failed", site_id=site_id)
+            return
+
+        if previous_prediction is None:
+            return
+
+        accuracy = compute_forecast_accuracy(
+            previous_prediction.predicted_consumption_kw, latest_observation.consumption_kw
+        )
+        self._experiment_logger.log_forecast_accuracy(
+            site_id=site_id,
+            model_version=previous_prediction.model_version,
+            target_timestamp=latest_observation.timestamp,
+            accuracy=accuracy,
         )
 
     def _forecast_one_site(

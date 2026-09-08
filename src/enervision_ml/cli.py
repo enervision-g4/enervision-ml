@@ -142,6 +142,11 @@ def forecast(
     d'arret (SIGTERM ou SIGINT) : c'est le mode utilise par le conteneur, dont
     `restart: unless-stopped` relancerait un processus qui se termine de lui-meme.
 
+    A chaque lot, avant d'entrainer un nouveau modele, confronte la derniere prevision
+    resolue de chaque site a la mesure reelle desormais connue et journalise l'ecart
+    dans MLflow (voir transform/forecast_accuracy.py) : contrairement a evaluate, ce
+    suivi porte sur le modele tel qu'il tourne reellement, pas sur un backtest.
+
     Args:
         once: Execute un seul lot puis s'arrete, au lieu de boucler.
 
@@ -163,6 +168,7 @@ def forecast(
             horizon_hours=settings.horizon_hours,
             minimum_training_hours=settings.min_training_hours,
             threshold_ratio=settings.threshold_ratio,
+            experiment_logger=build_experiment_logger(),
         )
 
         if once:
