@@ -5,6 +5,23 @@ site sur l'historique recent (`measure_imputed`), ecrit 24 heures de prevision d
 table `prediction`, et calcule un seuil d'alerte a partir de la capacite installee du
 site.
 
+## Documentation
+
+Ce README couvre l'installation, la configuration et l'usage. La justification des choix
+— quel modèle, pourquoi celui-là, comment il est évalué, comment MLflow est déployé et
+comment on compare deux modèles — vit dans [`docs/`](docs/README.md), rédigée pour être
+lue sans connaissance préalable en machine learning.
+
+| Document | Contenu |
+|---|---|
+| [1. Vue d'ensemble](docs/01-vue-densemble.md) | Le problème métier, la place dans l'architecture, le vocabulaire |
+| [2. Le modèle](docs/02-le-modele.md) | `HistGradientBoostingRegressor`, les alternatives écartées, `model_version` |
+| [3. Le pipeline de données](docs/03-pipeline-de-donnees.md) | Les cinq couches, l'agrégation horaire, l'idempotence |
+| [4. Évaluation et métriques](docs/04-evaluation-et-metriques.md) | Baseline, MAE / MAPE, backtest et justesse en production |
+| [5. MLflow](docs/05-mlflow.md) | Déploiement, contenu des runs, comparaison de modèles |
+| [6. Déploiement et exploitation](docs/06-deploiement-et-exploitation.md) | Image, CI/CD, compose, arrêt propre |
+| [7. FAQ jury](docs/07-faq-jury.md) | Les questions attendues et leurs réponses courtes |
+
 ## Principes directeurs
 
 - **Un modele par site.** Les identifiants de site different selon la source
