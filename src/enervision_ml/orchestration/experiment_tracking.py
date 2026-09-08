@@ -6,9 +6,11 @@ sont journalisees, jamais de modele : ce service n'en persiste aucun (voir
 model/forecaster.py), il n'y a donc rien a versionner cote artefacts.
 """
 
+from datetime import datetime
 from typing import Optional, Protocol, cast
 
 from ..transform.evaluation import SiteEvaluation
+from ..transform.forecast_accuracy import ForecastAccuracy
 from .evaluation_run import EvaluationReport
 
 
@@ -136,6 +138,57 @@ class ExperimentTrackingLogger:
             client.log_metric("model_mape", site_evaluation.model_mape.value)
             client.log_metric("baseline_mape", site_evaluation.baseline_mape.value)
             client.log_metric("improvement_percent", site_evaluation.improvement_percent)
+        finally:
+            client.end_run()
+
+    def log_forecast_accuracy(
+        self,
+        site_id: str,
+        model_version: str,
+        target_timestamp: datetime,
+        accuracy: ForecastAccuracy,
+    ) -> None:
+        """Journalise la justesse d'une prevision de production desormais resolue.
+
+        Un run par appel, jamais imbrique : contrairement a evaluate, chaque site est
+        juge independamment a son propre rythme (voir orchestration/forecast_run.py),
+        il n'y a pas de lot commun a rattacher en parent. Nomme comme les runs enfants
+        d'evaluate (run_name=site_id) mais distingue par le parametre stage, pour que
+        les deux ne se confondent pas dans l'IHM MLflow.
+
+        Args:
+            site_id: Site concerne.
+            model_version: Empreinte du modele ayant produit la prevision jugee.
+            target_timestamp: Heure visee par la prevision jugee.
+            accuracy: Ecart mesure entre cette prevision et la mesure reelle.
+        """
+        if self.client is None:
+            return
+
+        try:
+            self._log_forecast_accuracy(
+                self.client, site_id, model_version, target_timestamp, accuracy
+            )
+        except Exception as failure:
+            self._logger.warning("mlflow_logging_failed", error=str(failure))
+
+    @staticmethod
+    def _log_forecast_accuracy(
+        client: MlflowClientLike,
+        site_id: str,
+        model_version: str,
+        target_timestamp: datetime,
+        accuracy: ForecastAccuracy,
+    ) -> None:
+        client.start_run(run_name=site_id)
+        try:
+            client.log_param("stage", "forecast")
+            client.log_param("site_id", site_id)
+            client.log_param("model_version", model_version)
+            client.log_param("target_timestamp", target_timestamp.isoformat())
+            client.log_metric("forecast_mae", accuracy.mae)
+            if accuracy.mape is not None:
+                client.log_metric("forecast_mape", accuracy.mape.value)
         finally:
             client.end_run()
 

@@ -1,6 +1,9 @@
+from datetime import UTC, datetime
+
 from enervision_ml.orchestration.evaluation_run import EvaluationReport
 from enervision_ml.orchestration.experiment_tracking import ExperimentTrackingLogger
 from enervision_ml.transform.evaluation import MapeResult, SiteEvaluation
+from enervision_ml.transform.forecast_accuracy import ForecastAccuracy
 
 from .conftest import FakeMlflowClient, FakeWarningLogger
 
@@ -79,3 +82,69 @@ def test_all_runs_are_ended_even_if_a_site_fails_to_log() -> None:
     assert len(warning_logger.warnings) == 1
     # Le run enfant a ete ouvert avant l'echec, il ne doit pas rester ouvert.
     assert client.ended_run_count >= 1
+
+
+def test_forecast_accuracy_logging_is_a_noop_when_no_tracking_uri_is_configured() -> None:
+    warning_logger = FakeWarningLogger()
+    tracker = ExperimentTrackingLogger(client=None, logger=warning_logger)
+
+    tracker.log_forecast_accuracy(
+        site_id="SITE001",
+        model_version="scikit-learn==1.9.0+abc123",
+        target_timestamp=datetime(2024, 2, 1, 10, 0, tzinfo=UTC),
+        accuracy=ForecastAccuracy(mae=2.0, mape=MapeResult(value=20.0, excluded_count=0)),
+    )
+
+    assert warning_logger.warnings == []
+
+
+def test_forecast_accuracy_is_logged_as_a_standalone_run_tagged_forecast() -> None:
+    client = FakeMlflowClient()
+    tracker = ExperimentTrackingLogger(client=client, logger=FakeWarningLogger())
+
+    tracker.log_forecast_accuracy(
+        site_id="SITE001",
+        model_version="scikit-learn==1.9.0+abc123",
+        target_timestamp=datetime(2024, 2, 1, 10, 0, tzinfo=UTC),
+        accuracy=ForecastAccuracy(mae=2.0, mape=MapeResult(value=20.0, excluded_count=0)),
+    )
+
+    # Un seul run, jamais imbrique : pas de lot commun a rattacher en parent.
+    assert client.started_runs == [("SITE001", False)]
+    assert ("stage", "forecast") in client.logged_params
+    assert ("site_id", "SITE001") in client.logged_params
+    assert ("model_version", "scikit-learn==1.9.0+abc123") in client.logged_params
+    assert ("forecast_mae", 2.0) in client.logged_metrics
+    assert ("forecast_mape", 20.0) in client.logged_metrics
+    assert client.ended_run_count == 1
+
+
+def test_forecast_accuracy_skips_the_percentage_metric_when_absent() -> None:
+    client = FakeMlflowClient()
+    tracker = ExperimentTrackingLogger(client=client, logger=FakeWarningLogger())
+
+    tracker.log_forecast_accuracy(
+        site_id="SITE001",
+        model_version="scikit-learn==1.9.0+abc123",
+        target_timestamp=datetime(2024, 2, 1, 10, 0, tzinfo=UTC),
+        accuracy=ForecastAccuracy(mae=0.95, mape=None),
+    )
+
+    assert ("forecast_mae", 0.95) in client.logged_metrics
+    assert not any(key == "forecast_mape" for key, _ in client.logged_metrics)
+
+
+def test_forecast_accuracy_logging_never_raises_when_the_client_fails() -> None:
+    client = FakeMlflowClient(raise_on="start_run")
+    warning_logger = FakeWarningLogger()
+    tracker = ExperimentTrackingLogger(client=client, logger=warning_logger)
+
+    tracker.log_forecast_accuracy(
+        site_id="SITE001",
+        model_version="scikit-learn==1.9.0+abc123",
+        target_timestamp=datetime(2024, 2, 1, 10, 0, tzinfo=UTC),
+        accuracy=ForecastAccuracy(mae=2.0, mape=None),
+    )
+
+    assert len(warning_logger.warnings) == 1
+    assert warning_logger.warnings[0][0] == "mlflow_logging_failed"
