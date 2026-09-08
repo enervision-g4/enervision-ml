@@ -1,8 +1,8 @@
 """Assemble extraction, entrainement et ecriture pour la commande forecast.
 
-Un commit par site, apres ses previsions : un site en echec est journalise, annule, et
-compte dans sites_failed sans arreter la boucle sur le reste du parc, meme regle que
-realtime_collector.py cote ETL.
+Un commit par site, apres ses previsions et ses recommandations : un site en echec est
+journalise, annule, et compte dans sites_failed sans arreter la boucle sur le reste du
+parc, meme regle que realtime_collector.py cote ETL.
 """
 
 from collections.abc import Callable
@@ -11,12 +11,14 @@ from datetime import UTC, datetime
 from typing import Optional, cast
 
 from ..extract.history_source import HistorySourceLike
-from ..load.prediction_repository import insert_many
+from ..load.prediction_repository import insert_many as insert_predictions
+from ..load.recommendation_repository import insert_many as insert_recommendations
 from ..logging_setup import get_logger
 from ..model.forecaster import ConsumptionForecaster
 from ..postgres_connection import ConnectionLike
 from ..records import Observation, PredictionRow
 from ..transform.prediction_drafts import build_prediction_rows, build_target_timestamps
+from ..transform.recommendations import build_recommendations
 from ..transform.thresholds import compute_threshold_kw
 from ..transform.weather_outlook import Climatology, build_climatology, project_weather
 
@@ -31,11 +33,13 @@ class ForecastReport:
         sites_forecast: Sites pour lesquels au moins une prevision a ete ecrite.
         sites_skipped: Sites ignores faute d'historique suffisant.
         sites_failed: Sites dont l'ecriture a echoue et a ete annulee.
+        recommendations_written: Nombre total de recommandations ecrites sur le lot.
     """
 
     sites_forecast: list[str] = field(default_factory=list)
     sites_skipped: list[str] = field(default_factory=list)
     sites_failed: list[str] = field(default_factory=list)
+    recommendations_written: int = 0
 
 
 class ForecastRun:
@@ -76,7 +80,13 @@ class ForecastRun:
         Returns:
             Le rapport du lot, voir ForecastReport.
         """
-        report = ForecastReport()
+        # ForecastReport est fige : on accumule dans des variables locales et on ne
+        # construit l'instance qu'au retour, plutot que de reassigner un de ses champs
+        # (recommendations_written) en cours de route, ce qu'un dataclass fige refuse.
+        sites_forecast: list[str] = []
+        sites_skipped: list[str] = []
+        sites_failed: list[str] = []
+        recommendations_written = 0
         generated_at = self._now()
 
         for site in self._history_source.load_site_catalog():
@@ -92,22 +102,32 @@ class ForecastRun:
                     available_hours=len(observations),
                     required_hours=self._minimum_training_hours,
                 )
-                report.sites_skipped.append(site.site_id)
+                sites_skipped.append(site.site_id)
                 continue
 
             try:
-                rows = self._forecast_one_site(
+                prediction_rows = self._forecast_one_site(
                     site.site_id, site.capacity_kw, observations, generated_at
                 )
-                insert_many(self._connection, rows)
+                recommendation_rows = build_recommendations(prediction_rows)
+
+                insert_predictions(self._connection, prediction_rows)
+                insert_recommendations(self._connection, recommendation_rows)
                 self._connection.commit()
-                report.sites_forecast.append(site.site_id)
+
+                sites_forecast.append(site.site_id)
+                recommendations_written += len(recommendation_rows)
             except Exception:
                 self._connection.rollback()
                 logger.exception("forecast_failed", site_id=site.site_id)
-                report.sites_failed.append(site.site_id)
+                sites_failed.append(site.site_id)
 
-        return report
+        return ForecastReport(
+            sites_forecast=sites_forecast,
+            sites_skipped=sites_skipped,
+            sites_failed=sites_failed,
+            recommendations_written=recommendations_written,
+        )
 
     def _forecast_one_site(
         self,
