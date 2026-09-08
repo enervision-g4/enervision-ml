@@ -86,6 +86,63 @@ class StubHistorySource:
         return self._sites
 
 
+class FakeMlflowRun:
+    """Run MLflow factice : porte juste un identifiant pour verifier l'imbrication."""
+
+    def __init__(self, run_id: str) -> None:
+        self.run_id = run_id
+
+
+class FakeMlflowClient:
+    """Client MLflow factice : enregistre chaque appel, sans reseau reel.
+
+    raise_on permet de simuler l'echec d'une methode precise (site en panne de
+    tracking), pour verifier que log_evaluation_report ne laisse jamais un run
+    ouvert ni ne remonte l'erreur.
+    """
+
+    def __init__(self, raise_on: Optional[str] = None) -> None:
+        self.raise_on = raise_on
+        self.started_runs: list[tuple[Optional[str], bool]] = []
+        self.logged_params: list[tuple[str, object]] = []
+        self.logged_metrics: list[tuple[str, float]] = []
+        self.ended_run_count = 0
+        self._next_run_id = 0
+
+    def _maybe_raise(self, method_name: str) -> None:
+        if self.raise_on == method_name:
+            raise RuntimeError(f"{method_name} failed")
+
+    def start_run(self, run_name: Optional[str] = None, nested: bool = False) -> FakeMlflowRun:
+        self._maybe_raise("start_run")
+        self.started_runs.append((run_name, nested))
+        self._next_run_id += 1
+        return FakeMlflowRun(run_id=f"run-{self._next_run_id}")
+
+    def log_param(self, key: str, value: object) -> None:
+        self._maybe_raise("log_param")
+        self.logged_params.append((key, value))
+
+    def log_metric(self, key: str, value: float) -> None:
+        self._maybe_raise("log_metric")
+        self.logged_metrics.append((key, value))
+
+    def end_run(self) -> None:
+        self._maybe_raise("end_run")
+        self.ended_run_count += 1
+
+
+class FakeWarningLogger:
+    """Journal factice : n'enregistre que les avertissements, pour verifier
+    qu'un echec de tracking est bien signale sans faire planter l'appelant."""
+
+    def __init__(self) -> None:
+        self.warnings: list[tuple[str, dict[str, object]]] = []
+
+    def warning(self, event: str, **kw: object) -> None:
+        self.warnings.append((event, kw))
+
+
 def make_hourly_observations(
     site_id: str, count: int, consumption_kw: float = 10.0
 ) -> list[Observation]:

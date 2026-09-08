@@ -76,6 +76,7 @@ def test_the_improvement_is_negative_when_the_model_loses_against_the_baseline()
         truths=[10.0, 20.0, 30.0],
         model_predictions=[15.0, 25.0, 35.0],  # ecart constant de 5
         baseline_predictions=[11.0, 21.0, 31.0],  # ecart constant de 1, bien meilleur
+        model_version="scikit-learn==1.9.0+abc123",
     )
 
     assert evaluation.improvement_percent < 0
@@ -87,6 +88,19 @@ def test_the_improvement_is_positive_when_the_model_beats_the_baseline() -> None
         truths=[10.0, 20.0, 30.0],
         model_predictions=[11.0, 21.0, 31.0],
         baseline_predictions=[15.0, 25.0, 35.0],
+        model_version="scikit-learn==1.9.0+abc123",
     )
 
     assert evaluation.improvement_percent > 0
+
+
+def test_evaluate_site_surfaces_the_model_version_unchanged() -> None:
+    evaluation = evaluate_site(
+        site_id="SITE001",
+        truths=[10.0, 20.0],
+        model_predictions=[11.0, 21.0],
+        baseline_predictions=[12.0, 22.0],
+        model_version="scikit-learn==1.9.0+abc123",
+    )
+
+    assert evaluation.model_version == "scikit-learn==1.9.0+abc123"

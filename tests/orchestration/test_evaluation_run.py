@@ -60,3 +60,13 @@ def test_the_model_predictions_come_from_the_injected_forecaster() -> None:
     # StubEstimator predit toujours 12.0 : l'ecart absolu moyen du modele n'est autre
     # que l'ecart moyen entre 12.0 et les verites de test.
     assert report.evaluations[0].model_mae >= 0
+
+
+def test_the_evaluation_carries_the_forecaster_model_version() -> None:
+    run = make_run({"SITE001": make_hourly_observations("SITE001", 100)})
+
+    report = run.run()
+
+    # L'empreinte vient du forecaster reellement utilise pendant le run, pas d'une
+    # valeur figee : elle doit au moins etre non vide et nommer scikit-learn.
+    assert report.evaluations[0].model_version.startswith("scikit-learn==")

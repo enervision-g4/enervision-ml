@@ -16,6 +16,7 @@ from .extract.history_source import HistorySourceLike
 from .logging_setup import configure_logging, get_logger
 from .orchestration.drift_free_scheduler import DriftFreeScheduler
 from .orchestration.evaluation_run import EvaluationRun
+from .orchestration.experiment_tracking import build_experiment_logger
 from .orchestration.forecast_run import ForecastReport, ForecastRun
 from .orchestration.graceful_shutdown import ShutdownRequest
 from .postgres_connection import create_connection
@@ -97,6 +98,8 @@ def evaluate(
     if not report.evaluations:
         logger.error("no_site_evaluated", sites_skipped=report.sites_skipped)
         raise typer.Exit(code=1)
+
+    build_experiment_logger().log_evaluation_report(report, source=source, test_ratio=test_ratio)
 
     for site_evaluation in report.evaluations:
         typer.echo(
