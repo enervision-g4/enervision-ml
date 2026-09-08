@@ -94,7 +94,9 @@ class EvaluationRun:
         model_predictions = forecaster.predict(test)
 
         truths = [cast(float, observation.consumption_kw) for observation in test]
-        return evaluate_site(site_id, truths, model_predictions, baseline_predictions)
+        return evaluate_site(
+            site_id, truths, model_predictions, baseline_predictions, forecaster.model_version
+        )
 
     @staticmethod
     def _baseline_prediction(

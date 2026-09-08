@@ -61,6 +61,42 @@ def test_evaluate_reports_a_positive_gain_on_a_learnable_pattern(tmp_path: Path)
     assert "Gain moyen" in result.output
 
 
+def test_evaluate_still_succeeds_with_no_mlflow_tracking_uri_configured(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # Propriete protegee : evaluate --source csv ne doit exiger aucune
+    # configuration, y compris pour le suivi MLflow, qui reste optionnel.
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    csv_path = tmp_path / "history.csv"
+    write_synthetic_history(csv_path)
+
+    result = runner.invoke(
+        application, ["evaluate", "--source", "csv", "--csv-path", str(csv_path)]
+    )
+
+    assert result.exit_code == 0, result.output
+
+
+def test_evaluate_still_succeeds_when_mlflow_tracking_uri_is_unreachable(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # Port ferme, jamais de serveur en ecoute : verifie le vrai client mlflow,
+    # pas un faux, pour prouver que son echec est bien de type Exception. Retries
+    # et delai d'attente reduits au minimum : le client mlflow reessaie plusieurs
+    # fois avec un backoff par defaut, ce qui rendrait ce test tres lent sinon.
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:1")
+    monkeypatch.setenv("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "0")
+    monkeypatch.setenv("MLFLOW_HTTP_REQUEST_TIMEOUT", "1")
+    csv_path = tmp_path / "history.csv"
+    write_synthetic_history(csv_path)
+
+    result = runner.invoke(
+        application, ["evaluate", "--source", "csv", "--csv-path", str(csv_path)]
+    )
+
+    assert result.exit_code == 0, result.output
+
+
 def test_evaluate_without_a_csv_path_fails_clearly() -> None:
     result = runner.invoke(application, ["evaluate", "--source", "csv"])
 

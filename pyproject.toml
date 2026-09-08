@@ -19,6 +19,9 @@ dependencies = [
     "typer>=0.15",
     # Windows ne fournit aucune base de fuseaux horaires : zoneinfo la lit dans ce paquet.
     "tzdata>=2024.1 ; sys_platform == 'win32'",
+    # Client de suivi uniquement : jamais de serveur MLflow dans ce service, le
+    # paquet complet embarquerait Flask/gunicorn/pandas/pyarrow pour rien.
+    "mlflow-skinny>=3.16.0",
 ]
 
 [project.scripts]

@@ -16,6 +16,7 @@ from .extract.history_source import HistorySourceLike
 from .logging_setup import configure_logging, get_logger
 from .orchestration.drift_free_scheduler import DriftFreeScheduler
 from .orchestration.evaluation_run import EvaluationRun
+from .orchestration.experiment_tracking import build_experiment_logger
 from .orchestration.forecast_run import ForecastReport, ForecastRun
 from .orchestration.graceful_shutdown import ShutdownRequest
 from .postgres_connection import create_connection
@@ -98,6 +99,8 @@ def evaluate(
         logger.error("no_site_evaluated", sites_skipped=report.sites_skipped)
         raise typer.Exit(code=1)
 
+    build_experiment_logger().log_evaluation_report(report, source=source, test_ratio=test_ratio)
+
     for site_evaluation in report.evaluations:
         typer.echo(
             f"{site_evaluation.site_id:<10} "
@@ -139,6 +142,11 @@ def forecast(
     d'arret (SIGTERM ou SIGINT) : c'est le mode utilise par le conteneur, dont
     `restart: unless-stopped` relancerait un processus qui se termine de lui-meme.
 
+    A chaque lot, avant d'entrainer un nouveau modele, confronte la derniere prevision
+    resolue de chaque site a la mesure reelle desormais connue et journalise l'ecart
+    dans MLflow (voir transform/forecast_accuracy.py) : contrairement a evaluate, ce
+    suivi porte sur le modele tel qu'il tourne reellement, pas sur un backtest.
+
     Args:
         once: Execute un seul lot puis s'arrete, au lieu de boucler.
 
@@ -160,6 +168,7 @@ def forecast(
             horizon_hours=settings.horizon_hours,
             minimum_training_hours=settings.min_training_hours,
             threshold_ratio=settings.threshold_ratio,
+            experiment_logger=build_experiment_logger(),
         )
 
         if once:

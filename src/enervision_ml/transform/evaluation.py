@@ -32,6 +32,8 @@ class SiteEvaluation:
 
     Attributes:
         site_id: Site evalue.
+        model_version: Empreinte du contrat de features et de l'estimateur ayant
+            produit cette evaluation.
         model_mae: Erreur absolue moyenne du modele.
         baseline_mae: Erreur absolue moyenne de la baseline (profil horaire).
         model_mape: Erreur relative moyenne du modele.
@@ -41,6 +43,7 @@ class SiteEvaluation:
     """
 
     site_id: str
+    model_version: str
     model_mae: float
     baseline_mae: float
     model_mape: MapeResult
@@ -138,6 +141,7 @@ def evaluate_site(
     truths: Sequence[float],
     model_predictions: Sequence[float],
     baseline_predictions: Sequence[float],
+    model_version: str,
 ) -> SiteEvaluation:
     """Compare le modele et la baseline sur les memes verites.
 
@@ -146,6 +150,7 @@ def evaluate_site(
         truths: Valeurs observees sur la periode de test.
         model_predictions: Predictions du modele, dans le meme ordre.
         baseline_predictions: Predictions de la baseline, dans le meme ordre.
+        model_version: Empreinte du contrat de features et de l'estimateur utilise.
 
     Returns:
         La comparaison chiffree des deux, voir SiteEvaluation.
@@ -157,6 +162,7 @@ def evaluate_site(
     )
     return SiteEvaluation(
         site_id=site_id,
+        model_version=model_version,
         model_mae=model_mae,
         baseline_mae=baseline_mae,
         model_mape=mean_absolute_percentage_error(truths, model_predictions),
