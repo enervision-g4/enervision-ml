@@ -12,6 +12,7 @@ import typer
 from .config import load_forecast_settings
 from .extract.csv_history import CsvHistorySource
 from .extract.database_history import DatabaseHistorySource
+from .extract.history_source import HistorySourceLike
 from .logging_setup import configure_logging, get_logger
 from .orchestration.drift_free_scheduler import DriftFreeScheduler
 from .orchestration.evaluation_run import EvaluationRun
@@ -42,7 +43,7 @@ def _root() -> None:
 @application.command("evaluate")
 def evaluate(
     source: str = typer.Option(
-        "csv", "--source", help="Origine de l'historique. Seul csv est supporte pour l'instant."
+        "csv", "--source", help="Origine de l'historique : csv ou database."
     ),
     csv_path: Optional[str] = typer.Option(
         None, "--csv-path", help="Chemin du CSV, obligatoire quand --source vaut csv."
@@ -56,12 +57,13 @@ def evaluate(
 ) -> None:
     """Compare le modele a la baseline profil-horaire, sans rien ecrire en base.
 
-    Preuve, sans aucune infrastructure, que le modele apprend plus qu'un moyennage
-    naif par heure de la journee.
+    Preuve que le modele apprend plus qu'un moyennage naif par heure de la journee.
+    Avec --source database, lit measure_imputed comme le ferait forecast, mais
+    n'ecrit jamais de prevision : utile pour juger un jeu de donnees reel sans
+    polluer la table prediction.
 
     Args:
-        source: Origine de l'historique. Seul csv est supporte pour l'instant ;
-            database arrive a l'etape 6.
+        source: Origine de l'historique, csv ou database.
         csv_path: Chemin du fichier CSV, obligatoire quand source vaut csv.
         csv_source_timezone: Fuseau d'ancrage des horodatages naifs du CSV.
         test_ratio: Fraction de l'historique la plus recente reservee au test.
@@ -72,15 +74,25 @@ def evaluate(
     """
     configure_logging()
 
-    if source != "csv":
+    if source == "csv":
+        if not csv_path:
+            logger.error("missing_csv_path")
+            raise typer.Exit(code=1)
+        csv_history_source: HistorySourceLike = CsvHistorySource(
+            csv_path, source_timezone=csv_source_timezone
+        )
+        report = EvaluationRun(csv_history_source, test_ratio=test_ratio).run()
+    elif source == "database":
+        settings = load_forecast_settings()
+        connection = create_connection(settings.database_url)
+        try:
+            db_history_source: HistorySourceLike = DatabaseHistorySource(connection)
+            report = EvaluationRun(db_history_source, test_ratio=test_ratio).run()
+        finally:
+            connection.close()
+    else:
         logger.error("unsupported_evaluation_source", source=source)
         raise typer.Exit(code=1)
-    if not csv_path:
-        logger.error("missing_csv_path")
-        raise typer.Exit(code=1)
-
-    history_source = CsvHistorySource(csv_path, source_timezone=csv_source_timezone)
-    report = EvaluationRun(history_source, test_ratio=test_ratio).run()
 
     if not report.evaluations:
         logger.error("no_site_evaluated", sites_skipped=report.sites_skipped)

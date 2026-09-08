@@ -68,6 +68,14 @@ def test_evaluate_without_a_csv_path_fails_clearly() -> None:
 
 
 def test_evaluate_rejects_an_unsupported_source() -> None:
+    result = runner.invoke(application, ["evaluate", "--source", "parquet"])
+
+    assert result.exit_code != 0
+
+
+def test_evaluate_database_without_a_database_url_fails_clearly(monkeypatch) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
     result = runner.invoke(application, ["evaluate", "--source", "database"])
 
     assert result.exit_code != 0
