@@ -52,8 +52,9 @@ def test_a_successful_run_logs_one_parent_and_one_child_run_per_site() -> None:
 
     tracker.log_evaluation_report(report, source="csv", test_ratio=0.2)
 
-    # Un run parent (nested=False), un run enfant par site (nested=True).
-    assert client.started_runs[0] == (None, False)
+    # Un run parent nomme explicitement (nested=False), un run enfant par site
+    # (nested=True) nomme par son site_id.
+    assert client.started_runs[0] == ("evaluate_csv", False)
     assert client.started_runs[1:] == [("SITE001", True), ("SITE002", True)]
 
     assert ("source", "csv") in client.logged_params

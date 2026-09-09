@@ -101,6 +101,10 @@ class ExperimentTrackingLogger:
         metriques. Toute erreur (serveur injoignable, etc.) est avertie puis
         avalee : evaluate ne doit jamais echouer a cause du suivi.
 
+        Le run parent est nomme explicitement (evaluate_<source>) plutot que de
+        laisser MLflow lui attribuer un nom aleatoire (adjectif-animal) : sans
+        ca, il est indiscernable des runs par site dans la liste plate de l'UI.
+
         Args:
             report: Rapport produit par EvaluationRun.run().
             source: Origine de l'historique evalue (csv ou database).
@@ -118,7 +122,7 @@ class ExperimentTrackingLogger:
     def _log_report(
         client: MlflowClientLike, report: EvaluationReport, source: str, test_ratio: float
     ) -> None:
-        client.start_run()
+        client.start_run(run_name=f"evaluate_{source}")
         try:
             client.log_param("source", source)
             client.log_param("test_ratio", str(test_ratio))
