@@ -1,0 +1,192 @@
+"""Interface en ligne de commande du service de prevision.
+
+Composition root unique : c'est ici, et seulement ici, que la configuration est
+chargee et que les objets concrets (connexion, estimateur, source d'historique) sont
+assembles.
+"""
+
+from typing import Optional
+
+import typer
+
+from .config import load_forecast_settings
+from .extract.csv_history import CsvHistorySource
+from .extract.database_history import DatabaseHistorySource
+from .extract.history_source import HistorySourceLike
+from .logging_setup import configure_logging, get_logger
+from .orchestration.drift_free_scheduler import DriftFreeScheduler
+from .orchestration.evaluation_run import EvaluationRun
+from .orchestration.experiment_tracking import build_experiment_logger
+from .orchestration.forecast_run import ForecastReport, ForecastRun
+from .orchestration.graceful_shutdown import ShutdownRequest
+from .postgres_connection import create_connection
+
+logger = get_logger("cli")
+
+application = typer.Typer(
+    help="Service de prevision EnerVision : entrainement par site et ecriture des previsions.",
+    add_completion=False,
+    # Une erreur metier doit se lire, pas se decoder dans une trace Python.
+    pretty_exceptions_enable=False,
+)
+
+
+@application.callback()
+def _root() -> None:
+    """Service de prevision EnerVision.
+
+    Sans sous-commande, Typer ne construit aucune racine pour --help : ce
+    callback vide lui en donne une, meme avant que forecast et evaluate
+    n'existent.
+    """
+
+
+@application.command("evaluate")
+def evaluate(
+    source: str = typer.Option(
+        "csv", "--source", help="Origine de l'historique : csv ou database."
+    ),
+    csv_path: Optional[str] = typer.Option(
+        None, "--csv-path", help="Chemin du CSV, obligatoire quand --source vaut csv."
+    ),
+    csv_source_timezone: str = typer.Option(
+        "UTC", "--csv-source-timezone", help="Fuseau d'ancrage des horodatages naifs du CSV."
+    ),
+    test_ratio: float = typer.Option(
+        0.2, "--test-ratio", help="Fraction de l'historique la plus recente reservee au test."
+    ),
+) -> None:
+    """Compare le modele a la baseline profil-horaire, sans rien ecrire en base.
+
+    Preuve que le modele apprend plus qu'un moyennage naif par heure de la journee.
+    Avec --source database, lit measure_imputed comme le ferait forecast, mais
+    n'ecrit jamais de prevision : utile pour juger un jeu de donnees reel sans
+    polluer la table prediction.
+
+    Args:
+        source: Origine de l'historique, csv ou database.
+        csv_path: Chemin du fichier CSV, obligatoire quand source vaut csv.
+        csv_source_timezone: Fuseau d'ancrage des horodatages naifs du CSV.
+        test_ratio: Fraction de l'historique la plus recente reservee au test.
+
+    Raises:
+        typer.Exit: Si la source demandee n'est pas supportee, si --csv-path manque,
+            ou si aucun site n'a assez d'historique pour etre evalue.
+    """
+    configure_logging()
+
+    if source == "csv":
+        if not csv_path:
+            logger.error("missing_csv_path")
+            raise typer.Exit(code=1)
+        csv_history_source: HistorySourceLike = CsvHistorySource(
+            csv_path, source_timezone=csv_source_timezone
+        )
+        report = EvaluationRun(csv_history_source, test_ratio=test_ratio).run()
+    elif source == "database":
+        settings = load_forecast_settings()
+        connection = create_connection(settings.database_url)
+        try:
+            db_history_source: HistorySourceLike = DatabaseHistorySource(connection)
+            report = EvaluationRun(db_history_source, test_ratio=test_ratio).run()
+        finally:
+            connection.close()
+    else:
+        logger.error("unsupported_evaluation_source", source=source)
+        raise typer.Exit(code=1)
+
+    if not report.evaluations:
+        logger.error("no_site_evaluated", sites_skipped=report.sites_skipped)
+        raise typer.Exit(code=1)
+
+    build_experiment_logger().log_evaluation_report(report, source=source, test_ratio=test_ratio)
+
+    for site_evaluation in report.evaluations:
+        typer.echo(
+            f"{site_evaluation.site_id:<10} "
+            f"model_mae={site_evaluation.model_mae:7.2f} kW  "
+            f"baseline_mae={site_evaluation.baseline_mae:7.2f} kW  "
+            f"model_mape={site_evaluation.model_mape.value:6.2f} %  "
+            f"baseline_mape={site_evaluation.baseline_mape.value:6.2f} %  "
+            f"gain={site_evaluation.improvement_percent:+6.1f} %"
+        )
+    if report.sites_skipped:
+        typer.echo(f"Sites ignores (historique insuffisant) : {', '.join(report.sites_skipped)}")
+
+    average_improvement = sum(
+        site_evaluation.improvement_percent for site_evaluation in report.evaluations
+    ) / len(report.evaluations)
+    typer.echo(f"\nGain moyen du modele sur la baseline : {average_improvement:+.1f} %")
+
+
+def _log_forecast_report(report: ForecastReport, **extra: object) -> None:
+    logger.info(
+        "forecast_completed",
+        sites_forecast=len(report.sites_forecast),
+        sites_skipped=len(report.sites_skipped),
+        sites_failed=len(report.sites_failed),
+        recommendations_written=report.recommendations_written,
+        **extra,
+    )
+
+
+@application.command("forecast")
+def forecast(
+    once: bool = typer.Option(
+        False, "--once", help="Execute un seul lot puis s'arrete, au lieu de boucler."
+    ),
+) -> None:
+    """Entraine un modele par site sur measure_imputed et ecrit ses previsions en base.
+
+    Sans --once, boucle a la cadence FORECAST_INTERVAL_SECONDS jusqu'a un signal
+    d'arret (SIGTERM ou SIGINT) : c'est le mode utilise par le conteneur, dont
+    `restart: unless-stopped` relancerait un processus qui se termine de lui-meme.
+
+    A chaque lot, avant d'entrainer un nouveau modele, confronte la derniere prevision
+    resolue de chaque site a la mesure reelle desormais connue et journalise l'ecart
+    dans MLflow (voir transform/forecast_accuracy.py) : contrairement a evaluate, ce
+    suivi porte sur le modele tel qu'il tourne reellement, pas sur un backtest.
+
+    Args:
+        once: Execute un seul lot puis s'arrete, au lieu de boucler.
+
+    Raises:
+        typer.Exit: Avec --once, si au moins un site a echoue.
+    """
+    settings = load_forecast_settings()
+    configure_logging(settings.log_level, settings.log_as_json)
+
+    shutdown = ShutdownRequest()
+    shutdown.install()
+
+    connection = create_connection(settings.database_url)
+    try:
+        history_source = DatabaseHistorySource(connection)
+        run = ForecastRun(
+            history_source=history_source,
+            connection=connection,
+            horizon_hours=settings.horizon_hours,
+            minimum_training_hours=settings.min_training_hours,
+            threshold_ratio=settings.threshold_ratio,
+            experiment_logger=build_experiment_logger(),
+        )
+
+        if once:
+            report = run.run()
+            _log_forecast_report(report)
+            if report.sites_failed:
+                raise typer.Exit(code=1)
+            return
+
+        scheduler = DriftFreeScheduler(settings.forecast_interval_seconds)
+        while not shutdown.requested:
+            tick = scheduler.wait_for_next_tick(should_stop=lambda: shutdown.requested)
+            if shutdown.requested:
+                break
+            _log_forecast_report(run.run(), tick=tick.index, skipped_ticks=tick.skipped_ticks)
+    finally:
+        connection.close()
+
+
+if __name__ == "__main__":
+    application()
