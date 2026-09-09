@@ -46,3 +46,20 @@ def estimator_library_version() -> str:
     import sklearn
 
     return f"scikit-learn=={sklearn.__version__}"
+
+
+def estimator_class_name() -> str:
+    """Nom de la classe d'estimateur utilisee par create_estimator().
+
+    Sert a identifier l'algorithme dans MLflow (voir orchestration/experiment_tracking.py) :
+    model_version est une empreinte du contrat de features, pas un nom lisible, elle ne
+    permet pas de savoir d'un coup d'oeil dans l'UI quel type de modele a produit un run.
+    Ne construit pas d'instance, seul le nom de la classe importe ici.
+
+    Returns:
+        Le nom de classe seul, par exemple "HistGradientBoostingRegressor".
+    """
+    from sklearn.ensemble import HistGradientBoostingRegressor
+
+    # scikit-learn ne livre pas de py.typed : sans str(), mypy voit __name__ comme Any.
+    return str(HistGradientBoostingRegressor.__name__)
