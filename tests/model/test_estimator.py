@@ -1,6 +1,10 @@
 import numpy as np
 
-from enervision_ml.model.estimator import create_estimator, estimator_library_version
+from enervision_ml.model.estimator import (
+    create_estimator,
+    estimator_class_name,
+    estimator_library_version,
+)
 
 
 def test_estimator_library_version_names_scikit_learn() -> None:
@@ -9,6 +13,10 @@ def test_estimator_library_version_names_scikit_learn() -> None:
 
 def test_create_estimator_returns_a_new_instance_each_call() -> None:
     assert create_estimator() is not create_estimator()
+
+
+def test_estimator_class_name_matches_what_create_estimator_builds() -> None:
+    assert estimator_class_name() == type(create_estimator()).__name__
 
 
 def test_the_real_estimator_learns_a_daily_pattern_better_than_its_mean() -> None:

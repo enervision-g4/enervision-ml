@@ -70,3 +70,6 @@ def test_the_evaluation_carries_the_forecaster_model_version() -> None:
     # L'empreinte vient du forecaster reellement utilise pendant le run, pas d'une
     # valeur figee : elle doit au moins etre non vide et nommer scikit-learn.
     assert report.evaluations[0].model_version.startswith("scikit-learn==")
+    # make_run injecte un StubEstimator (voir plus haut) : estimator_name reflete
+    # l'estimateur reellement utilise pendant CE run, pas toujours le vrai modele.
+    assert report.evaluations[0].estimator_name == "StubEstimator"

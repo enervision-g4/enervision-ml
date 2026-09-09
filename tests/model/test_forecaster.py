@@ -13,6 +13,12 @@ def test_the_model_version_is_set_before_fitting() -> None:
     assert not forecaster.is_fitted
 
 
+def test_the_estimator_name_reflects_the_injected_estimator() -> None:
+    forecaster = ConsumptionForecaster("SITE001", estimator=StubEstimator())
+
+    assert forecaster.estimator_name == "StubEstimator"
+
+
 def test_predict_before_fit_raises_unfitted_model_error() -> None:
     forecaster = ConsumptionForecaster("SITE001", estimator=StubEstimator())
 

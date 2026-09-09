@@ -137,6 +137,7 @@ class ExperimentTrackingLogger:
         try:
             client.log_param("site_id", site_evaluation.site_id)
             client.log_param("model_version", site_evaluation.model_version)
+            client.log_param("estimator", site_evaluation.estimator_name)
             client.log_metric("model_mae", site_evaluation.model_mae)
             client.log_metric("baseline_mae", site_evaluation.baseline_mae)
             client.log_metric("model_mape", site_evaluation.model_mape.value)
@@ -184,11 +185,20 @@ class ExperimentTrackingLogger:
         target_timestamp: datetime,
         accuracy: ForecastAccuracy,
     ) -> None:
+        # Pas de forecaster vivant a cet instant (celui qui a produit la prevision
+        # jugee vient d'un cycle precedent, deja jete) et prediction n'a pas de
+        # colonne pour le nom de classe : ce champ decrit donc l'estimateur que ce
+        # service utilise actuellement, pas necessairement celui qui a genere cette
+        # prevision precise si l'algorithme a change entre-temps. Vrai en pratique
+        # tant qu'un seul type d'estimateur existe (voir model/estimator.py).
+        from ..model.estimator import estimator_class_name
+
         client.start_run(run_name=site_id)
         try:
             client.log_param("stage", "forecast")
             client.log_param("site_id", site_id)
             client.log_param("model_version", model_version)
+            client.log_param("estimator", estimator_class_name())
             client.log_param("target_timestamp", target_timestamp.isoformat())
             client.log_metric("forecast_mae", accuracy.mae)
             if accuracy.mape is not None:

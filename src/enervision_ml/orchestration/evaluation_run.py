@@ -95,7 +95,12 @@ class EvaluationRun:
 
         truths = [cast(float, observation.consumption_kw) for observation in test]
         return evaluate_site(
-            site_id, truths, model_predictions, baseline_predictions, forecaster.model_version
+            site_id,
+            truths,
+            model_predictions,
+            baseline_predictions,
+            forecaster.model_version,
+            forecaster.estimator_name,
         )
 
     @staticmethod

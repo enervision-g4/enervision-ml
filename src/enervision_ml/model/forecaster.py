@@ -26,6 +26,9 @@ class ConsumptionForecaster:
         site_id: Site pour lequel ce modele est entraine.
         model_version: Empreinte du contrat de features et de l'estimateur, connue
             des la construction, independamment de l'entrainement.
+        estimator_name: Nom de la classe de l'estimateur utilise (ex.
+            "HistGradientBoostingRegressor"), pour l'identifier lisiblement dans
+            MLflow sans decoder l'empreinte model_version.
     """
 
     def __init__(self, site_id: str, estimator: Optional[EstimatorLike] = None) -> None:
@@ -39,6 +42,7 @@ class ConsumptionForecaster:
         self.site_id = site_id
         self._estimator = estimator if estimator is not None else create_estimator()
         self.model_version = build_model_version(estimator_library_version())
+        self.estimator_name = type(self._estimator).__name__
         self._is_fitted = False
 
     @property
