@@ -12,6 +12,7 @@ def make_evaluation(site_id: str) -> SiteEvaluation:
     return SiteEvaluation(
         site_id=site_id,
         model_version="scikit-learn==1.9.0+abc123",
+        estimator_name="HistGradientBoostingRegressor",
         model_mae=5.5,
         baseline_mae=10.2,
         model_mape=MapeResult(value=3.1, excluded_count=0),
@@ -61,6 +62,7 @@ def test_a_successful_run_logs_one_parent_and_one_child_run_per_site() -> None:
     assert ("test_ratio", "0.2") in client.logged_params
     assert ("site_id", "SITE001") in client.logged_params
     assert ("model_version", "scikit-learn==1.9.0+abc123") in client.logged_params
+    assert ("estimator", "HistGradientBoostingRegressor") in client.logged_params
 
     assert ("model_mae", 5.5) in client.logged_metrics
     assert ("baseline_mae", 10.2) in client.logged_metrics
@@ -115,6 +117,7 @@ def test_forecast_accuracy_is_logged_as_a_standalone_run_tagged_forecast() -> No
     assert ("stage", "forecast") in client.logged_params
     assert ("site_id", "SITE001") in client.logged_params
     assert ("model_version", "scikit-learn==1.9.0+abc123") in client.logged_params
+    assert ("estimator", "HistGradientBoostingRegressor") in client.logged_params
     assert ("forecast_mae", 2.0) in client.logged_metrics
     assert ("forecast_mape", 20.0) in client.logged_metrics
     assert client.ended_run_count == 1

@@ -77,6 +77,7 @@ def test_the_improvement_is_negative_when_the_model_loses_against_the_baseline()
         model_predictions=[15.0, 25.0, 35.0],  # ecart constant de 5
         baseline_predictions=[11.0, 21.0, 31.0],  # ecart constant de 1, bien meilleur
         model_version="scikit-learn==1.9.0+abc123",
+        estimator_name="HistGradientBoostingRegressor",
     )
 
     assert evaluation.improvement_percent < 0
@@ -89,6 +90,7 @@ def test_the_improvement_is_positive_when_the_model_beats_the_baseline() -> None
         model_predictions=[11.0, 21.0, 31.0],
         baseline_predictions=[15.0, 25.0, 35.0],
         model_version="scikit-learn==1.9.0+abc123",
+        estimator_name="HistGradientBoostingRegressor",
     )
 
     assert evaluation.improvement_percent > 0
@@ -101,6 +103,7 @@ def test_evaluate_site_surfaces_the_model_version_unchanged() -> None:
         model_predictions=[11.0, 21.0],
         baseline_predictions=[12.0, 22.0],
         model_version="scikit-learn==1.9.0+abc123",
+        estimator_name="HistGradientBoostingRegressor",
     )
 
     assert evaluation.model_version == "scikit-learn==1.9.0+abc123"
