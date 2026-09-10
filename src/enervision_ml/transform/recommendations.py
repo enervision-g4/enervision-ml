@@ -40,7 +40,8 @@ def _build_recommendation(prediction: PredictionRow, threshold_kw: float) -> Rec
     hour_label = prediction.target_timestamp.strftime("%Y-%m-%d %H:%M")
     action_description = (
         f"Consommation prevue de {prediction.predicted_consumption_kw:.1f} kW a "
-        f"{hour_label} UTC, au-dessus du seuil de {threshold_kw:.1f} kW."
+        f"{hour_label} UTC, au-dessus du seuil de {threshold_kw:.1f} kW. "
+        "Prevoyez de baisser votre consommation a cette periode."
     )
     return RecommendationRow(
         recommendation_id=uuid4(),
